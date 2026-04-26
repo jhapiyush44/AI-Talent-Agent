@@ -3,7 +3,15 @@ import numpy as np
 from difflib import SequenceMatcher
 
 # ---------- LOAD MODEL ----------
-model = SentenceTransformer('all-MiniLM-L6-v2')
+model = None
+
+def get_model():
+    global model
+    if model is None:
+        from sentence_transformers import SentenceTransformer
+        print("🔄 Loading embedding model...")
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+    return model
 
 
 # ---------- NORMALIZATION ----------
@@ -48,6 +56,8 @@ def keyword_match(skill, candidate_skills):
 
 # ---------- EMBEDDING CACHE ----------
 def embed(texts, cache):
+    model = get_model()  # 🔥 lazy load here
+
     results = []
 
     for t in texts:
