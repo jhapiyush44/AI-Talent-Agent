@@ -25,8 +25,6 @@ Recruiters often spend hours manually reviewing resumes. This system automates t
 
 > GitHub supports Mermaid. If it doesn't render on your viewer, it will still show as code.
 
-## 🏗️ Architecture Diagram
-
 ```mermaid
 flowchart TD
 
@@ -50,6 +48,16 @@ K --> L[Final Output]
 
 L --> M[Streamlit Dashboard]
 ```
+
+---
+
+
+## 🏗️ Architecture Diagram 2.0 
+
+> Just incase Mermaid fails in your system.
+<p align="center">
+  <img src="AI-Agent.png" width="800"/>
+</p>
 
 ---
 
