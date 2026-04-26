@@ -5,3 +5,4 @@ __pycache__/
 resumes_cache.json
 *.log
 .DS_Store
+resumes/
