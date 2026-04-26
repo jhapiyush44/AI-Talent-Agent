@@ -25,21 +25,30 @@ Recruiters often spend hours manually reviewing resumes. This system automates t
 
 > GitHub supports Mermaid. If it doesn't render on your viewer, it will still show as code.
 
+## 🏗️ Architecture Diagram
+
 ```mermaid
 flowchart TD
-    A[Job Description Input] --> B[JD Parser (LLM + Fallback)]
-    C[Resumes Folder / Upload] --> D[Resume Parser (LLM + Fallback)]
-    B --> E[Structured JD]
-    D --> F[Structured Candidates]
-    E --> G[Hybrid Scoring Engine]
-    F --> G
-    G --> H[Ranking Engine]
-    H --> I[Top K Candidates]
-    H --> J[All Candidates]
-    I --> K[LLM Interest Simulation]
-    K --> L[Final Scored Output]
-    L --> M[Streamlit UI Dashboard]
-```
+
+A[Job Description Input] --> B[JD Parser LLM Fallback]
+C[Resumes Source] --> D[Resume Parser LLM Fallback]
+
+B --> E[Structured JD]
+D --> F[Structured Candidates]
+
+E --> G[Hybrid Scoring Engine]
+F --> G
+
+G --> H[Ranking Engine]
+
+H --> I[Top K Candidates]
+H --> J[All Candidates]
+
+I --> K[LLM Interest Simulation]
+
+K --> L[Final Output]
+
+L --> M[Streamlit Dashboard]
 
 ---
 
