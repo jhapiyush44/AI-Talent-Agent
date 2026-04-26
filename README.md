@@ -56,7 +56,7 @@ L --> M[Streamlit Dashboard]
 
 > Just incase Mermaid fails in your system.
 <p align="center">
-  <img src="AI-Agent.png" width="800"/>
+  <img src="architecture.png" width="800"/>
 </p>
 
 ---
