@@ -1,11 +1,11 @@
-from google import genai
+import google.generativeai as genai
 import os
 import json
 import re
 from dotenv import load_dotenv
 
 load_dotenv()
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # ---------- NORMALIZATION ----------
 def normalize_skill(skill):
@@ -162,10 +162,8 @@ def parse_resume(text):
     """
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt
-        )
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content(prompt)
 
         parsed = safe_parse_json(response.text)
 
