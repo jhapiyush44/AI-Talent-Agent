@@ -49,6 +49,7 @@ I --> K[LLM Interest Simulation]
 K --> L[Final Output]
 
 L --> M[Streamlit Dashboard]
+```
 
 ---
 
