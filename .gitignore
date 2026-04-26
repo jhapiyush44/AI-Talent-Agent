@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+.env
+resumes_cache.json
+*.log
+.DS_Store

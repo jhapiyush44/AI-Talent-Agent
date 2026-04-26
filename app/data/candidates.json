@@ -1,0 +1,355 @@
+[
+  {
+    "name": "Amit Sharma",
+    "skills": ["Python", "FastAPI", "Machine Learning", "Docker"],
+    "experience": 1,
+    "projects": ["ML API deployment built machine learning APIs using FastAPI and Docker deployed scalable backend services"],
+    "bio": "Built ML APIs using FastAPI and Docker"
+  },
+  {
+    "name": "Rahul Verma",
+    "skills": ["Python", "Flask", "Machine Learning"],
+    "experience": 1,
+    "projects": ["Stock prediction built machine learning model using Flask for real-time stock forecasting"],
+    "bio": "Worked on ML models using Flask"
+  },
+  {
+    "name": "Sneha Iyer",
+    "skills": ["Python", "Deep Learning", "NLP"],
+    "experience": 2,
+    "projects": ["Chatbot NLP built deep learning based NLP chatbot using transformers and text processing"],
+    "bio": "Experienced in NLP and deep learning"
+  },
+  {
+    "name": "Arjun Reddy",
+    "skills": ["Python", "FastAPI", "Docker", "Kubernetes"],
+    "experience": 2,
+    "projects": ["Scalable ML APIs built scalable backend APIs using FastAPI Docker and Kubernetes"],
+    "bio": "Built scalable ML systems"
+  },
+  {
+    "name": "Priya Singh",
+    "skills": ["Python", "Machine Learning", "Pandas"],
+    "experience": 0,
+    "projects": ["EDA project"],
+    "bio": "Fresher with ML basics"
+  },
+  {
+    "name": "Ritika Shah",
+    "skills": ["Python", "FastAPI", "Machine Learning"],
+    "experience": 1,
+    "projects": ["Recommendation API built machine learning recommendation system using FastAPI backend"],
+    "bio": "Built ML recommendation APIs"
+  },
+  {
+    "name": "Siddharth Jain",
+    "skills": ["Python", "LLM", "RAG"],
+    "experience": 1,
+    "projects": ["LLM chatbot built RAG based LLM chatbot using embeddings and retrieval pipelines"],
+    "bio": "Worked with LLM pipelines"
+  },
+  {
+    "name": "Akash Singh",
+    "skills": ["Python", "Docker", "ML"],
+    "experience": 2,
+    "projects": ["ML deployment built end-to-end machine learning pipeline with Docker deployment"],
+    "bio": "Built end-to-end ML systems"
+  },
+  {
+    "name": "Neha Gupta",
+    "skills": ["Python", "Machine Learning"],
+    "experience": 0,
+    "projects": ["Beginner ML"],
+    "bio": "Entry-level ML enthusiast"
+  },
+  {
+    "name": "Harsh Vardhan",
+    "skills": ["Python", "FastAPI", "SQL"],
+    "experience": 1,
+    "projects": ["API with DB built backend APIs using FastAPI and integrated SQL database"],
+    "bio": "Backend developer with APIs"
+  },
+
+  {
+    "name": "Karan Patel",
+    "skills": ["Java", "Spring Boot", "MySQL"],
+    "experience": 2,
+    "projects": ["E-commerce backend"],
+    "bio": "Backend developer with Java"
+  },
+  {
+    "name": "Rohit Das",
+    "skills": ["Django", "SQL"],
+    "experience": 2,
+    "projects": ["Blog platform"],
+    "bio": "Web developer"
+  },
+  {
+    "name": "Vikram Joshi",
+    "skills": ["C++", "DSA"],
+    "experience": 1,
+    "projects": ["Competitive coding"],
+    "bio": "Strong in algorithms"
+  },
+
+  {
+    "name": "Ananya Kapoor",
+    "skills": ["Digital Marketing", "SEO", "Content Writing"],
+    "experience": 2,
+    "projects": ["SEO campaigns"],
+    "bio": "Worked on marketing campaigns"
+  },
+  {
+    "name": "Riya Mehta",
+    "skills": ["Social Media Marketing", "Branding"],
+    "experience": 1,
+    "projects": ["Instagram campaigns"],
+    "bio": "Social media strategist"
+  },
+  {
+    "name": "Kabir Khan",
+    "skills": ["Sales", "Negotiation", "CRM"],
+    "experience": 3,
+    "projects": ["B2B sales"],
+    "bio": "Experienced sales professional"
+  },
+  {
+    "name": "Simran Kaur",
+    "skills": ["HR", "Recruitment", "Onboarding"],
+    "experience": 2,
+    "projects": ["Hiring campaigns managed recruitment process including screening onboarding and HR coordination"],
+    "bio": "HR specialist"
+  },
+  {
+    "name": "Aditya Malhotra",
+    "skills": ["Finance", "Excel", "Accounting"],
+    "experience": 2,
+    "projects": ["Financial reports"],
+    "bio": "Finance analyst"
+  },
+  {
+    "name": "Pooja Nair",
+    "skills": ["Accounting", "Taxation"],
+    "experience": 3,
+    "projects": ["Tax filing"],
+    "bio": "Accountant"
+  },
+  {
+    "name": "Gaurav Tiwari",
+    "skills": ["Operations", "Supply Chain"],
+    "experience": 2,
+    "projects": ["Logistics management"],
+    "bio": "Operations manager"
+  },
+
+  {
+    "name": "Meera Kulkarni",
+    "skills": ["UI/UX", "Figma", "Design"],
+    "experience": 1,
+    "projects": ["App design"],
+    "bio": "UI/UX designer"
+  },
+  {
+    "name": "Tanvi Kapoor",
+    "skills": ["Graphic Design", "Photoshop"],
+    "experience": 2,
+    "projects": ["Brand assets"],
+    "bio": "Graphic designer"
+  },
+  {
+    "name": "Ishita Bose",
+    "skills": ["Content Writing", "Blogging"],
+    "experience": 1,
+    "projects": ["Blogs"],
+    "bio": "Content writer"
+  },
+  {
+    "name": "Nikhil Bansal",
+    "skills": ["Data Analysis", "Excel", "SQL"],
+    "experience": 1,
+    "projects": ["Sales dashboard"],
+    "bio": "Data analyst"
+  },
+  {
+    "name": "Yash Agarwal",
+    "skills": ["Business Analysis", "Power BI"],
+    "experience": 1,
+    "projects": ["Business dashboards"],
+    "bio": "Business analyst"
+  },
+
+  {
+    "name": "Divya Rathi",
+    "skills": ["Python", "FastAPI", "LLM"],
+    "experience": 1,
+    "projects": ["LLM chatbot built AI chatbot using LLM and FastAPI backend"],
+    "bio": "Built LLM apps"
+  },
+  {
+    "name": "Shreya Ghosh",
+    "skills": ["Python", "NLP"],
+    "experience": 1,
+    "projects": ["NLP API"],
+    "bio": "NLP developer"
+  },
+  {
+    "name": "Rohan Kapoor",
+    "skills": ["Python", "ML", "Docker"],
+    "experience": 1,
+    "projects": ["ML deployment deployed machine learning models using Docker containers"],
+    "bio": "Worked on ML deployment"
+  },
+  {
+    "name": "Varun Khanna",
+    "skills": ["Python"],
+    "experience": 0,
+    "projects": ["Basic ML"],
+    "bio": "Beginner"
+  },
+
+  {
+    "name": "Sonal Gupta",
+    "skills": ["Customer Support", "CRM"],
+    "experience": 2,
+    "projects": ["Support system"],
+    "bio": "Customer support specialist"
+  },
+  {
+    "name": "Aakash Jain",
+    "skills": ["Marketing", "Sales"],
+    "experience": 1,
+    "projects": ["Campaigns"],
+    "bio": "Marketing executive"
+  },
+  {
+    "name": "Deepak Kumar",
+    "skills": ["Python", "ML", "SQL"],
+    "experience": 1,
+    "projects": ["Sales prediction built machine learning model with SQL data pipelines for sales forecasting"],
+    "bio": "ML applied to business"
+  },
+
+  {
+    "name": "Kavya Menon",
+    "skills": ["NLP", "Transformers"],
+    "experience": 2,
+    "projects": ["BERT classifier"],
+    "bio": "Advanced NLP models"
+  },
+  {
+    "name": "Manish Yadav",
+    "skills": ["React", "Node.js"],
+    "experience": 2,
+    "projects": ["Frontend apps"],
+    "bio": "Frontend dev"
+  },
+  {
+    "name": "Swati Desai",
+    "skills": ["Python", "FastAPI", "NLP"],
+    "experience": 1,
+    "projects": ["Chatbot API built NLP chatbot API using FastAPI backend"],
+    "bio": "Chatbot developer"
+  },
+
+  {
+    "name": "Rakesh Mishra",
+    "skills": ["Logistics", "Warehouse Management"],
+    "experience": 3,
+    "projects": ["Inventory system"],
+    "bio": "Logistics expert"
+  },
+  {
+    "name": "Farhan Ali",
+    "skills": ["Sales", "Client Handling"],
+    "experience": 2,
+    "projects": ["Retail sales"],
+    "bio": "Sales associate"
+  },
+  {
+    "name": "Ankit Jain",
+    "skills": ["Python", "ML", "FastAPI"],
+    "experience": 1,
+    "projects": ["ML API built machine learning API using FastAPI and deployed model services"],
+    "bio": "ML engineer"
+  },
+
+  {
+    "name": "Neeraj Singh",
+    "skills": ["Teaching", "Mathematics"],
+    "experience": 4,
+    "projects": ["Coaching"],
+    "bio": "Math teacher"
+  },
+  {
+    "name": "Sakshi Agarwal",
+    "skills": ["HR", "Communication"],
+    "experience": 1,
+    "projects": ["Hiring assisted in recruitment process candidate communication and onboarding"],
+    "bio": "HR fresher"
+  },
+  {
+    "name": "Aditi Rao",
+    "skills": ["Design", "Figma"],
+    "experience": 1,
+    "projects": ["UI design"],
+    "bio": "UI designer"
+  },
+
+  {
+    "name": "Mohit Sinha",
+    "skills": ["Python", "Data Analysis"],
+    "experience": 1,
+    "projects": ["EDA"],
+    "bio": "Data analyst"
+  },
+  {
+    "name": "Suresh Kumar",
+    "skills": ["Accounting"],
+    "experience": 5,
+    "projects": ["Finance"],
+    "bio": "Senior accountant"
+  },
+  {
+    "name": "Alok Verma",
+    "skills": ["Operations", "Management"],
+    "experience": 4,
+    "projects": ["Process optimization"],
+    "bio": "Operations lead"
+  },
+
+  {
+    "name": "Kriti Sharma",
+    "skills": ["Content Writing", "SEO"],
+    "experience": 2,
+    "projects": ["Blogs"],
+    "bio": "SEO writer"
+  },
+  {
+    "name": "Dev Patel",
+    "skills": ["Python", "FastAPI"],
+    "experience": 1,
+    "projects": ["API project built REST APIs using FastAPI backend framework"],
+    "bio": "Backend dev"
+  },
+  {
+    "name": "Nisha Arora",
+    "skills": ["Marketing", "Branding"],
+    "experience": 2,
+    "projects": ["Brand campaigns"],
+    "bio": "Marketing specialist"
+  },
+  {
+    "name": "Tarun Gupta",
+    "skills": ["Python", "ML", "Docker"],
+    "experience": 2,
+    "projects": ["ML system built production level machine learning system using Docker"],
+    "bio": "ML engineer"
+  },
+  {
+    "name": "Pankaj Yadav",
+    "skills": ["Sales", "Negotiation"],
+    "experience": 3,
+    "projects": ["Field sales"],
+    "bio": "Sales executive"
+  }
+]
