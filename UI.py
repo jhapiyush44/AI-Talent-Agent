@@ -1,8 +1,40 @@
 import streamlit as st
 import requests
 import time
+import os
+from dotenv import load_dotenv
 
-st.set_page_config(page_title="AI Talent Agent", layout="wide")
+# Load environment variables
+load_dotenv()
+
+# Configuration
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
+
+st.set_page_config(
+    page_title="AI Talent Agent", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ---------- BACKEND HEALTH CHECK ----------
+@st.cache_data(ttl=30)
+def check_backend_health():
+    try:
+        response = requests.get(f"{API_URL}/health", timeout=2)
+        return response.status_code == 200
+    except:
+        return False
+
+if not check_backend_health():
+    st.error("⚠️ **Backend server is not running!**")
+    st.info(f"""
+    Please start the backend server:
+    ```bash
+    uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ```
+    Expected URL: `{API_URL}`
+    """)
+    st.stop()
 
 # ---------- SIDEBAR ----------
 st.sidebar.title("⚙️ Settings")
@@ -111,7 +143,7 @@ if run_clicked:
 
         try:
             response = requests.post(
-                "http://127.0.0.1:8000/run-agent",
+                f"{API_URL}/run-agent",
                 files=files if files else None,
                 data=data,
                 timeout=180
@@ -128,6 +160,7 @@ if run_clicked:
         st.stop()
 
     st.success("✅ Analysis Complete")
+    st.markdown("---")
 
     # ---------- RESULTS ----------
     for i, c in enumerate(result["top_candidates"], 1):
@@ -135,50 +168,77 @@ if run_clicked:
         decision_color = get_color(c["decision"])
         icon = get_icon(c["decision"])
 
-        # ---------- CLEAN CARD ----------
+        # ---------- CANDIDATE CARD (Fixed for dark mode) ----------
         st.markdown(f"""
         <div style='
-            border:1px solid #ddd;
-            padding:16px;
-            border-radius:10px;
-            margin-bottom:12px;
-            background-color:#ffffff;
+            border: 2px solid {decision_color};
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, rgba(46,125,50,0.05) 0%, rgba(0,0,0,0) 100%);
         '>
-
-            <h3 style='color:#111; margin-bottom:4px;'>
-                {i}. {c.get('name', 'Unknown Candidate')}
-            </h3>
-
-            <p style='margin:0; color:#555; font-size:14px;'>
+            <div style='display: flex; justify-content: space-between; align-items: center;'>
+                <h2 style='margin: 0; font-size: 24px;'>
+                    {i}. {c.get('name', 'Unknown Candidate')}
+                </h2>
+                <span style='
+                    background-color: {decision_color}; 
+                    color: white; 
+                    padding: 8px 16px; 
+                    border-radius: 20px; 
+                    font-weight: bold;
+                    font-size: 14px;
+                '>
+                    {icon} {c["decision"]}
+                </span>
+            </div>
+            <p style='margin: 8px 0 0 0; font-size: 14px; opacity: 0.8;'>
                 📧 {c.get("email", "Not Provided")}
             </p>
-
-            <p style='margin-top:8px; font-weight:600; color:{decision_color};'>
-                {icon} {c["decision"]}
-            </p>
-
         </div>
         """, unsafe_allow_html=True)
 
         # ---------- SCORES ----------
         col1, col2, col3 = st.columns(3)
 
-        col1.metric("Match Score", c["match_score"])
-        col2.metric("Interest Score", c["interest_score"])
-        col3.metric("Final Score", c["final_score"])
+        with col1:
+            st.metric("🎯 Match Score", f"{c['match_score']:.2f}", 
+                     delta=None, delta_color="off")
+        with col2:
+            st.metric("💬 Interest Score", f"{c['interest_score']:.2f}", 
+                     delta=None, delta_color="off")
+        with col3:
+            st.metric("⭐ Final Score", f"{c['final_score']:.2f}", 
+                     delta=None, delta_color="off")
 
-        st.progress(c["final_score"])
+        # ---------- PROGRESS BAR ----------
+        st.progress(c["final_score"], text=f"Overall Score: {c['final_score']:.0%}")
 
-        # ---------- DETAILS ----------
-        with st.expander("📊 View Details"):
-            st.write("**Explanation:**")
-            st.write(c["explanation"])
-
-            st.write("**Simulated Candidate Response:**")
-            st.write(c["simulated_response"])
-
-            if "interest_reason" in c:
-                st.write("**Interest Reason:**")
+        # ---------- SCORE BREAKDOWN ----------
+        with st.expander("📊 View Detailed Analysis", expanded=False):
+            
+            # Visual breakdown
+            st.markdown("**Score Contribution:**")
+            match_contribution = c["match_score"] * 0.75
+            interest_contribution = c["interest_score"] * 0.25
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.metric("Match (75% weight)", f"{match_contribution:.2f}")
+            with col_b:
+                st.metric("Interest (25% weight)", f"{interest_contribution:.2f}")
+            
+            st.markdown("---")
+            
+            # Explanation
+            st.markdown("**📈 Match Score Breakdown:**")
+            st.text(c["explanation"])
+            
+            st.markdown("**💬 Simulated Candidate Response:**")
+            st.info(c["simulated_response"])
+            
+            if "interest_reason" in c and c["interest_reason"] not in ["Fallback", "Default fallback", "Skipped LLM"]:
+                st.markdown("**🧠 Interest Analysis:**")
                 st.write(c["interest_reason"])
 
         st.markdown("---")

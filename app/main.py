@@ -16,6 +16,12 @@ RESUME_FOLDER = os.path.join(BASE_DIR, "..", "resumes")
 FALLBACK_JSON = os.path.join(BASE_DIR, "data", "candidates.json")
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for frontend to verify backend is running"""
+    return {"status": "ok", "message": "AI Talent Agent backend is running"}
+
+
 @app.post("/run-agent")
 async def run_agent_api(
     jd_file: UploadFile = File(None),
