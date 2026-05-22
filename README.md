@@ -1,6 +1,11 @@
-# 🎯 AI Talent Agent v2.0
+
+<div align="center">
+
+# 🎯 AI Talent Agent
 
 > **Intelligent candidate screening powered by Gemini LLM · SentenceTransformers · Pinecone RAG**
+
+*Powered by Gemini 2.5 · Pinecone RAG · Semantic Embeddings · FastAPI · Streamlit*
 
 An end-to-end AI recruitment pipeline that automatically parses job descriptions, extracts structured data from resumes, scores candidates through a hybrid semantic scoring engine, and ranks them for recruiter review — all through a polished Streamlit dashboard.
 
@@ -14,72 +19,221 @@ An end-to-end AI recruitment pipeline that automatically parses job descriptions
 [![RAG](https://img.shields.io/badge/RAG-Retrieval_Augmented_Generation-6f42c1?style=flat&logo=ai&logoColor=white)](https://en.wikipedia.org/wiki/Retrieval-augmented_generation)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 
+---
+
+*Drop in a Job Description. Drop in a folder of resumes. Get a ranked, scored, explained shortlist in under 60 seconds.*
+
+</div>
 
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [Overview](#overview)
+- [What It Does](#what-it-does)
 - [Architecture](#architecture)
-- [Project Structure](#project-structure)
+- [Scoring Formula](#scoring-formula)
 - [Tech Stack](#tech-stack)
-- [Scoring System](#scoring-system)
-- [LLM Strategy](#llm-strategy)
-- [Caching & Resilience](#caching--resilience)
-- [Pinecone RAG Layer](#pinecone-rag-layer)
-- [Setup & Running Locally](#setup--running-locally)
-- [Environment Variables](#environment-variables)
-- [API Reference](#api-reference)
-- [File-by-File Breakdown](#file-by-file-breakdown)
+- [Project Structure](#project-structure)
+- [Setup & Installation](#setup--installation)
+- [Configuration](#configuration)
+- [Running the App](#running-the-app)
+- [How the Pipeline Works](#how-the-pipeline-works)
+- [Resume & JD Parsing](#resume--jd-parsing)
+- [Pinecone RAG — What It Does & Why](#pinecone-rag--what-it-does--why)
+- [Failure Handling](#failure-handling)
+- [UI Overview](#ui-overview)
+- [Known Limitations & Roadmap](#known-limitations--roadmap)
 
 ---
 
-## Overview
+## What It Does
 
-Recruiters spend hours manually screening resumes. This system automates the full pipeline:
+AI Talent Agent automates the most tedious part of recruitment — reading through piles of resumes and ranking candidates against a job description. It:
 
-1. **Parse** a job description (typed or uploaded) → structured skills + experience range
-2. **Parse** all resumes in the `resumes/` folder → structured candidate profiles (with caching + retry + quarantine)
-3. **Embed** both JD and candidates using SentenceTransformers
-4. **RAG retrieval** via Pinecone (optional) to semantically pre-filter candidates
-5. **Score** every candidate with a hybrid formula (skills + projects + experience + tiebreakers)
-6. **Rank** and select Top-K candidates
-7. **Simulate** candidate interest using Gemini (Top 5 only, to control cost)
-8. **Display** results on a dark-themed Streamlit dashboard with skill chip breakdown and score cards
+- **Parses any JD** — paste text or upload a PDF/DOCX/TXT file
+- **Parses all resumes** in a folder — PDF, DOCX, and TXT supported
+- **Semantically matches skills** — no keyword lists needed; `"LLM-powered Systems"` matches `"Large Language Models"` automatically via embedding cosine similarity
+- **Scores each candidate** using a justified hybrid formula (skills 60%, projects 25%, experience 15%)
+- **Ranks and explains** — every score comes with a breakdown showing exactly which required skills matched and which were missing
+- **Simulates candidate interest** — LLM-generated realistic response from the candidate's perspective (informational only, not part of the score)
+- **Stores profiles in Pinecone** for semantic retrieval at scale — the foundation for handling 500+ resume libraries
 
 ---
 
 ## Architecture
 
+The system is built in clearly separated layers. Every request flows strictly top-down; the only upward signal is the final ranked result returned to the UI.
+
 ```
-flowchart TD
+  USER INPUTS
+  ┌────────────────────┐          ┌────────────────────┐
+  │  Job Description   │          │   Resumes folder   │
+  │ text/PDF/DOCX/TXT  │          │  PDF · DOCX · TXT  │
+  └────────┬───────────┘          └──────────┬─────────┘
+           │                                 │
+           └──────────────┬──────────────────┘
+                          ▼
+  ┌──────────────────────────────────────────────────────┐
+  │              Streamlit Dashboard  (UI.py)            │
+  │   Dark theme · JD input · Live log panel · Cards     │
+  └──────────────────────┬───────────────────────────────┘
+                         │  HTTP POST /run-agent
+                         ▼
+  ┌──────────────────────────────────────────────────────┐
+  │              FastAPI Backend  (app/main.py)          │
+  │     /health · /run-agent · JD file extraction        │
+  └──────────────────────┬───────────────────────────────┘
+                         │
+                         ▼
+  ┌──────────────────────────────────────────────────────┐
+  │           Agent Orchestrator  (app/agent.py)         │
+  │  parse → embed → upsert → retrieve → score → rank   │
+  └───┬───────────────┬──────────────────┬───────────────┘
+      │               │                  │
+      ▼               ▼                  ▼
+  ┌────────┐   ┌────────────┐   ┌──────────────────────┐
+  │   JD   │   │  Resume    │   │       Scorer         │
+  │ Parser │   │  Parser    │   │                      │
+  │        │   │            │   │  Semantic skill      │
+  │ Gemini │   │ Gemini LLM │   │  matching via embed  │
+  │ LLM +  │   │ 3× retry   │   │  cosine ≥ 0.60       │
+  │ regex  │   │ quarantine │   │                      │
+  │fallback│   │ JSON cache │   │  Project · Exp score │
+  └───┬────┘   └─────┬──────┘   └──────────┬───────────┘
+      │               │                     │
+      └───────┬───────┘                     │
+              ▼                             ▼
+  ┌───────────────────────┐   ┌─────────────────────────┐
+  │  Google Gemini 2.5    │   │   all-MiniLM-L6-v2      │
+  │  Flash                │   │   SentenceTransformers  │
+  │  google-genai SDK     │   │   384-dim  ·  local CPU │
+  │                       │   │   cached after 1st load │
+  │  · JD parsing         │   │                         │
+  │  · Resume parsing     │   │   · Skill pair embed    │
+  │  · Interest sim       │   │   · Project score       │
+  └───────────────────────┘   │   · Context tiebreaker  │
+                               └────────────┬────────────┘
+                                            │ embeds
+                               ┌────────────▼────────────┐
+                               │   Vector Store          │
+                               │   (vector_store.py)     │
+                               │                         │
+                               │   Pinecone Serverless   │
+                               │   · Upsert profiles     │
+                               │   · Keyed by filename   │
+                               │   · Namespaced per JD   │
+                               │   · Query → RAG scores  │
+                               └─────────────────────────┘
 
-A[Job Description — text or file upload]
-C[resumes/ folder — PDF, DOCX, TXT]
+  ──────────────────── SCORING PIPELINE ─────────────────────
 
-A --> B[jd_parser.py · Gemini LLM + regex fallback]
-C --> D[resume_parser.py · Gemini LLM + retry + quarantine + cache]
+  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────────┐
+  │  Skill score     │  │  Project score   │  │  Experience score  │
+  │  0.60 weight     │  │  0.25 weight     │  │  0.15 weight       │
+  │                  │  │                  │  │                    │
+  │  Per JD skill:   │  │  Embed project   │  │  Work yrs only     │
+  │  embed + cosine  │  │  descriptions vs │  │  (not grad year)   │
+  │  ≥ 0.60 = match  │  │  JD keywords     │  │  null → 0.65       │
+  └────────┬─────────┘  └────────┬─────────┘  └──────────┬─────────┘
+           └────────────────────┬┘                        │
+                                └────────────────┬────────┘
+                                                 ▼
+                  match = 0.60×skill + 0.25×project + 0.15×experience
+                  final = match + context boost (≤3%) + RAG boost (≤3%)
+                  interest simulation → shown on card, NOT in formula
 
-B --> E[Structured JD]
-D --> F[Structured Candidates]
+  ──────────────────── DECISIONS ─────────────────────────────
 
-E --> G[agent.py · SentenceTransformers embed]
-F --> G
-
-G --> H[vector_store.py · Pinecone upsert + RAG query]
-H --> I[rag_scores per candidate]
-
-G --> J[scorer.py · Hybrid Scoring Engine v4]
-I --> J
-
-J --> K[Ranked candidate list]
-K --> L[Interest simulation · Gemini · Top 5 only]
-L --> M[Final output dict]
-
-M --> N[main.py · FastAPI · /run-agent]
-N --> O[UI.py · Streamlit Dashboard]
+  ┌──────────────────┬──────────────┬────────────┬──────────┐
+  │ Strong Shortlist │  Shortlist   │  Consider  │  Reject  │
+  │     ≥ 72%        │   ≥ 58%      │  ≥ 42%     │  < 42%   │
+  └──────────────────┴──────────────┴────────────┴──────────┘
+                                 │
+                                 ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │          Ranked candidate cards  →  Streamlit UI         │
+  │  Breakdown · matched skills · simulated interest         │
+  └──────────────────────────────────────────────────────────┘
 ```
+
+### Failure handling in the pipeline
+
+Each resume goes through up to three LLM parse attempts with a 1.5s delay between each. On any success the result is cached and scoring proceeds normally. If all three fail, the resume is copied to `resumes_failed/`, a regex fallback result is used for that run, and a final re-attempt happens after the entire primary pass completes. If that recovery succeeds the LLM result replaces the fallback; if it fails the fallback stays in the output.
+
+### Data flow table
+
+| Stage | Input | Output | Module |
+|---|---|---|---|
+| JD parsing | Raw JD text | Required skills, optional skills, exp range | `jd_parser.py` + Gemini |
+| Resume parsing | PDF/DOCX/TXT | Name, skills, projects, experience, summary | `resume_parser.py` + Gemini |
+| Embedding | Text strings | 384-dim float vectors | `all-MiniLM-L6-v2` (local) |
+| RAG upsert | Candidate profile text | Pinecone index entry, keyed by filename | `vector_store.py` |
+| RAG query | JD embedding | Top-K candidate IDs + cosine scores | `vector_store.py` |
+| Skill matching | JD skill ↔ resume skill pairs | Match / no-match, per pair | `scorer.py` |
+| Scoring | Component scores | `match_score` 0–1 | `scorer.py` |
+| Interest sim | Top-5 candidate + JD excerpt | Simulated candidate response text | `agent.py` → Gemini |
+| Ranking | All scored candidates | Sorted list + decision badges | `agent.py` |
+
+---
+
+## Scoring Formula
+
+The final score is computed purely from measurable signals. Interest simulation is **shown on the card but excluded from the score** — it's LLM-generated output that always skews positive and would artificially inflate rankings.
+
+```
+match_score = 0.60 × skill_score
+            + 0.25 × project_score
+            + 0.15 × experience_score
+            + context_tiebreaker  (max +3%)
+            + RAG_tiebreaker      (max +3%)
+
+final_score = match_score
+```
+
+### Component breakdown
+
+| Component | Weight | What it measures |
+|---|---|---|
+| **Skill Score** | 60% | Semantic match of candidate skills against JD required (70%) + optional (30%) skills |
+| **Project Score** | 25% | Embedding cosine similarity between project descriptions and JD keywords + required skills |
+| **Experience Score** | 15% | Years of work experience vs JD range (None → 0.65 neutral, not penalised) |
+| **Context Tiebreaker** | ≤3% | Full profile embedding vs JD embedding — breaks ties within a band |
+| **RAG Tiebreaker** | ≤3% | Pinecone cosine score — semantic profile retrieval boost |
+
+### Decision thresholds
+
+| Decision | Threshold | What it means |
+|---|---|---|
+| **Strong Shortlist** | ≥ 72% | ≥70% required skills matched + strong project evidence |
+| **Shortlist** | ≥ 58% | Majority of required skills, reviewable projects |
+| **Consider** | ≥ 42% | Partial match — worth manual review |
+| **Reject** | < 42% | Insufficient demonstrated skill coverage |
+
+### Skill matching — semantic, not keyword
+
+Every JD skill is embedded using `all-MiniLM-L6-v2` and compared against every candidate skill via cosine similarity. A match is declared when similarity ≥ 0.60. This means:
+
+- `"LLM-powered Systems"` ↔ `"Large Language Models"` → match (~0.91 sim)  
+- `"Google Cloud (Learning)"` ↔ `"GCP"` → match (~0.82 sim)
+- `"Gemini API"` ↔ `"Gemini"` → match (~0.95 sim)
+
+No synonym tables. No manual maintenance. Works across any domain.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| LLM | Google Gemini 2.5 Flash (`google-genai` SDK) |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (local, CPU) |
+| Vector DB | Pinecone Serverless (free tier, `us-east-1`) |
+| Backend | FastAPI + Uvicorn |
+| Frontend | Streamlit (custom dark theme, CSS variables) |
+| PDF parsing | PyMuPDF (`fitz`) |
+| DOCX parsing | `python-docx` |
+| Resume/JD extraction | Gemini 2.5 Flash with structured JSON prompts + regex fallback |
 
 ---
 
@@ -87,351 +241,277 @@ N --> O[UI.py · Streamlit Dashboard]
 
 ```
 ai-talent-agent/
+│
 ├── app/
-│   ├── main.py           # FastAPI backend — routes, JD text extraction from upload
-│   ├── agent.py          # Orchestration — ties all modules together
-│   ├── scorer.py         # Hybrid scoring engine v4
-│   ├── jd_parser.py      # JD parsing — Gemini LLM + regex fallback
-│   ├── resume_parser.py  # Resume parsing — Gemini LLM + retry + quarantine
-│   ├── vector_store.py   # Pinecone RAG — upsert + semantic retrieval
-│   ├── simulator.py      # (Legacy) standalone interest simulator — not used by agent.py
-│   └── utils.py          # (Legacy) standalone helpers — not used by agent.py
-├── resumes/              # Drop resume files here (PDF, DOCX, TXT)
-├── resumes_failed/       # Auto-created — quarantined resumes that failed parsing
-├── UI.py                 # Streamlit recruiter dashboard
-├── requirements.txt      # All Python dependencies
-├── resumes_cache.json    # Auto-generated — parsed resume cache (do not commit)
-└── .env                  # API keys (do not commit)
+│   ├── __init__.py
+│   ├── main.py           # FastAPI app — /health, /run-agent endpoints
+│   ├── agent.py          # Orchestration: ties all modules together
+│   ├── jd_parser.py      # JD → structured skills/experience (LLM + regex fallback)
+│   ├── resume_parser.py  # Resume → structured profile (LLM + retry + quarantine)
+│   ├── scorer.py         # Hybrid semantic scoring engine
+│   └── vector_store.py   # Pinecone RAG — upsert, query, namespace management
+│
+├── UI.py                 # Streamlit dashboard
+│
+├── resumes/              # Drop candidate resumes here (PDF/DOCX/TXT)
+├── resumes_failed/       # Auto-populated: resumes that failed all parse attempts
+│
+├── resumes_cache.json    # Parse cache — delete to force re-parse
+├── requirements.txt
+├── .env.example
+└── README.md
 ```
 
-> **Note:** `simulator.py` and `utils.py` are legacy files from v1. The active pipeline uses the interest simulation logic embedded directly in `agent.py` and the caching logic inside `agent.py`/`resume_parser.py`.
-
 ---
 
-## Tech Stack
+## Setup & Installation
 
-| Component | Technology |
-|---|---|
-| **Backend API** | FastAPI + Uvicorn |
-| **Frontend** | Streamlit (dark theme, custom CSS) |
-| **LLM** | Google Gemini (`gemini-2.5-flash` by default) via `google-genai` SDK |
-| **Embeddings** | SentenceTransformers `all-MiniLM-L6-v2` (384-dim) |
-| **Vector DB / RAG** | Pinecone (optional — graceful degradation if unconfigured) |
-| **Resume parsing** | PyMuPDF (`fitz`) for PDF, `python-docx` for DOCX |
-| **Language** | Python 3.10+ |
+### Prerequisites
 
----
-
-## Scoring System
-
-### Formula — Hybrid Semantic Scoring Engine v4
-
-```
-match_score = 0.60 × skill_score
-            + 0.25 × project_score
-            + 0.15 × experience_score
-            + context_tiebreaker  (max +3%)
-            + rag_tiebreaker      (max +3%)
-
-final_score = match_score   ← interest_score is informational only, NOT in ranking
-```
-
-### Component Details
-
-#### 1. Skill Score (60%) — Semantic + Exact
-The most heavily weighted component because it directly answers "can this person do the job?"
-
-Matching proceeds in order, stopping at the first hit:
-1. **Exact match** — after normalization (lowercase, strip parens, normalize separators)
-2. **Substring** — one skill contains the other (e.g. "PyTorch" in "PyTorch 2.0")
-3. **Token overlap** — ≥75% of JD skill tokens appear in candidate skill
-4. **Semantic cosine** — SentenceTransformers embedding cosine ≥ 0.60 threshold
-
-Within the skill component: **70% required skills**, **30% optional skills**.
-
-Both embedding results and match verdicts are cached in-memory to avoid redundant API calls.
-
-#### 2. Project Score (25%) — Embedding
-Compares the concatenated text of a candidate's project descriptions against the JD's required skills + keywords via cosine similarity. Captures real-world demonstrated ability beyond listed skills.
-
-#### 3. Experience Score (15%) — Rule-Based
-
-| Condition | Score |
-|---|---|
-| Within JD range | 1.0 |
-| Under by N years | `max(0.0, 1.0 − N × 0.20)` |
-| Over by N years | `max(0.60, 1.0 − N × 0.03)` |
-| No experience field | 0.65 (neutral, not penalised) |
-| JD has no range specified | 0.85 (assumed acceptable) |
-
-Over-qualification carries only a mild penalty — being senior is not a disqualifier.
-
-#### 4. Tiebreakers (max +3% each)
-- **Context tiebreaker**: cosine similarity of full candidate bio+skills vs. the JD embedding
-- **RAG tiebreaker**: Pinecone cosine score for the candidate, scaled to max +3%
-
-Both tiebreakers are capped to ensure they cannot flip a decision band — they only break ties within a band.
-
-### Decision Thresholds
-
-| Decision | Score Range |
-|---|---|
-| **Strong Shortlist** ✦ | ≥ 72% |
-| **Shortlist** ● | ≥ 58% |
-| **Consider** ◐ | ≥ 42% |
-| **Reject** ○ | < 42% |
-
----
-
-## LLM Strategy
-
-LLMs (Gemini) are called **only where structured reasoning or free-text generation is essential** — not for scoring, which is pure math.
-
-| Task | LLM Used? | Why |
-|---|---|---|
-| JD parsing | ✅ | Structured extraction from freeform text |
-| Resume parsing | ✅ | Extracting skills, projects, exp from varied formats |
-| Skill scoring | ❌ | Embedding cosine is cheaper, faster, consistent |
-| Project scoring | ❌ | Embedding similarity |
-| Experience scoring | ❌ | Rule-based — no ambiguity in numbers |
-| Interest simulation | ✅ Top 5 only | Generative — needs creative text output |
-
-**Model**: `gemini-2.5-flash` (configurable via `GEMINI_MODEL` env var)
-
-**Interest score derivation** (in `agent.py`): The LLM generates a 2–3 sentence simulated candidate response. The score is then derived heuristically by counting positive sentiment keywords ("excited", "thrilled", "perfect fit" → 0.85; neutral signals → 0.55; etc.). The interest score is **displayed on the UI card** but is **not included in the ranking formula** because it is synthetic and always skews positive.
-
----
-
-## Caching & Resilience
-
-### Resume Parsing Cache (`resumes_cache.json`)
-- **First run**: every resume is parsed by Gemini → result stored in cache keyed by filename
-- **Subsequent runs**: cache hit → zero LLM calls, instant load
-- Manually delete `resumes_cache.json` to force re-parsing
-
-### Retry Logic (in `resume_parser.py`)
-- Each resume gets up to **3 LLM parse attempts** with 1.5s delay between retries
-- On all 3 failures: **regex fallback** kicks in (extracts name, email, skills via patterns)
-- The failed file is **quarantined** to `resumes_failed/` and re-attempted at end of run
-
-### JSON Robustness (both parsers)
-Both `jd_parser.py` and `resume_parser.py` apply the same cleaning pipeline before `json.loads()`:
-- Strip markdown fences (` ```json `)
-- Remove JS-style `//` and `/* */` comments
-- Remove trailing commas before `}` or `]`
-
----
-
-## Pinecone RAG Layer
-
-`vector_store.py` implements an optional Pinecone-backed semantic retrieval layer.
-
-**When enabled** (requires `PINECONE_API_KEY`):
-1. All parsed candidates are embedded and **upserted** to a Pinecone index (`talent-agent`, 384-dim cosine)
-2. Each run is **namespaced** by a hash of the JD text, so multiple job runs don't pollute each other
-3. The JD is queried against Pinecone to get a **RAG score** (cosine similarity) per candidate
-4. This score is passed to `scorer.py` as the `rag_score` tiebreaker (max +3%)
-
-**When disabled** (no API key or `pinecone` not installed): the system degrades gracefully — all RAG scores are `None`, the rag tiebreaker is skipped, and the pipeline runs normally. The UI shows `⚪ Pinecone not configured`.
-
-**Index config**: `talent-agent` on AWS `us-east-1`, serverless, created automatically on first run.
-
----
-
-## Setup & Running Locally
+- Python 3.10+
+- A [Google AI Studio](https://aistudio.google.com) API key (free)
+- A [Pinecone](https://pinecone.io) account and API key (free tier sufficient)
 
 ### 1. Clone the repo
+
 ```bash
 git clone https://github.com/jhapiyush44/AI-Talent-Agent.git
 cd AI-Talent-Agent
 ```
 
 ### 2. Create and activate a virtual environment
+
 ```bash
 python -m venv venv
-source venv/bin/activate       # macOS / Linux
-venv\Scripts\activate          # Windows
+
+# Windows
+venv\Scripts\activate
+
+# Linux / macOS
+source venv/bin/activate
 ```
 
 ### 3. Install dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
-> **Note on PyTorch**: `sentence-transformers` requires `torch`. If the above is slow or you don't need GPU, install the CPU-only build first:
-> ```bash
-> pip install torch --index-url https://download.pytorch.org/whl/cpu
-> ```
+> **Note:** If you see a CUDA warning about an old NVIDIA driver, it's safe to ignore — the embedding model runs on CPU by default and works perfectly.
 
-### 4. Create `.env`
+### 4. Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
 ```env
 GOOGLE_API_KEY=your_gemini_api_key_here
-
-# Optional — enables Pinecone RAG
 PINECONE_API_KEY=your_pinecone_api_key_here
-
-# Optional — override defaults
-GEMINI_MODEL=gemini-2.5-flash
-RESUME_DIR=resumes
-API_URL=http://127.0.0.1:8000
 ```
+
+That's all that's required. Everything else has safe defaults.
 
 ### 5. Add resumes
-Drop PDF, DOCX, or TXT resume files into the `resumes/` folder.
 
-### 6. Start the FastAPI backend
-```bash
-uvicorn app.main:app --reload
-```
-Backend runs at `http://127.0.0.1:8000`. Verify: `http://127.0.0.1:8000/health`
-
-### 7. Start the Streamlit UI (new terminal)
-```bash
-streamlit run UI.py
-```
-UI opens at `http://localhost:8501`
+Drop all candidate resumes (PDF, DOCX, or TXT) into the `resumes/` folder.
 
 ---
 
-## Environment Variables
+## Configuration
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `GOOGLE_API_KEY` | ✅ | — | Gemini API key (also accepted as `GEMINI_API_KEY`) |
-| `PINECONE_API_KEY` | ❌ | — | Enables Pinecone RAG; system works without it |
-| `GEMINI_MODEL` | ❌ | `gemini-2.5-flash` | Gemini model name |
-| `RESUME_DIR` | ❌ | `resumes/` | Path to resumes folder |
-| `API_URL` | ❌ | `http://127.0.0.1:8000` | Backend URL used by Streamlit UI |
+| `GOOGLE_API_KEY` | ✅ Yes | — | Google AI Studio API key |
+| `PINECONE_API_KEY` | ⚪ Optional | — | Enables RAG retrieval. App works without it |
+| `GEMINI_MODEL` | ⚪ Optional | `gemini-2.5-flash` | Swap model without touching code |
+| `RESUME_DIR` | ⚪ Optional | `./resumes` | Path to resume folder |
+| `API_URL` | ⚪ Optional | `http://127.0.0.1:8000` | Backend URL for the UI |
+
+**Available Gemini models (May 2026):**
+
+| Model | Free RPM | Free RPD | Notes |
+|---|---|---|---|
+| `gemini-2.5-flash` | 10 | 250 | Recommended — best balance |
+| `gemini-2.5-flash-lite` | 15 | 1000 | Highest throughput |
+| `gemini-2.5-pro` | 5 | 100 | Most capable |
 
 ---
 
-## API Reference
+## Running the App
 
-### `GET /health`
-Health check. Returns `{"status": "ok", "version": "2.0.0"}`.
+You need two terminal windows.
 
-### `POST /run-agent`
-Run the full pipeline.
+**Terminal 1 — Start the backend:**
 
-**Form fields:**
+```bash
+uvicorn app.main:app --reload
+```
 
-| Field | Type | Description |
-|---|---|---|
-| `jd_text` | `str` | Raw job description text (use this OR `jd_file`) |
-| `jd_file` | `UploadFile` | JD file (PDF, DOCX, or TXT) — text is extracted server-side |
-| `top_k` | `int` | Number of top candidates to return (default: 10; use 100 for "All") |
+**Terminal 2 — Start the UI:**
 
-**Response:**
-```json
-{
-  "top_candidates": [
-    {
-      "name": "Jane Doe",
-      "email": "jane@example.com",
-      "experience_years": 2.5,
-      "skills": ["Python", "PyTorch", "FastAPI", "MLOps"],
-      "match_score": 0.81,
-      "interest_score": 0.85,
-      "final_score": 0.81,
-      "decision": "Strong Shortlist",
-      "explanation": "─── Scoring Formula ─...",
-      "simulated_response": "This role looks like a great fit for me...",
-      "interest_reason": "LLM simulated",
-      "rag_boosted": true
-    }
-  ],
-  "total_evaluated": 12,
-  "jd_required_skills": ["Python", "PyTorch", "FastAPI"],
-  "jd_optional_skills": ["Docker", "AWS"],
-  "pinecone_enabled": true
-}
+```bash
+streamlit run UI.py
+```
+
+Open your browser at `http://localhost:8501`.
+
+> **First run:** The embedding model (`all-MiniLM-L6-v2`) will be downloaded from HuggingFace (~90MB) and cached locally. Subsequent runs load from cache instantly.
+
+> **Cache:** Parsed resumes are cached in `resumes_cache.json`. If you update resumes or want to force a re-parse with improved prompts, delete this file.
+
+---
+
+## How the Pipeline Works
+
+When you click **▶ Run Agent**, the following happens in order:
+
+```
+1.  Parse JD          → Gemini extracts required skills, optional skills,
+                        experience range, keywords. Regex fallback if JSON fails.
+
+2.  Load Resumes      → Check cache first. Parse uncached resumes with Gemini.
+                        On failure: retry up to 3× with 1.5s delay.
+                        If all retries fail: quarantine to resumes_failed/,
+                        use regex fallback, re-attempt quarantined files at end.
+
+3.  Embed JD          → all-MiniLM-L6-v2 encodes JD summary (384-dim vector)
+
+4.  Pinecone RAG      → Upsert all candidate profile embeddings (keyed by filename).
+                        Query index for top-K semantically similar candidates.
+                        Returns cosine scores used as tiebreakers.
+
+5.  Score Candidates  → For each candidate × each JD skill:
+                          - Fast path: exact / substring / token overlap check
+                          - Semantic path: embed both, cosine ≥ 0.60 = match
+                        Compute skill / project / experience scores.
+                        Apply context + RAG tiebreakers (capped at +3% each).
+
+6.  Rank              → Sort by match_score descending.
+
+7.  Interest Sim      → Gemini generates a realistic candidate response
+                        for top-5 only (informational, not scored).
+
+8.  Return results    → JSON response → Streamlit renders candidate cards.
 ```
 
 ---
 
-## File-by-File Breakdown
+## Resume & JD Parsing
 
-### `app/main.py`
-FastAPI app (v2.0.0). Sets up CORS, configures logging, and exposes two routes:
-- `GET /health` — uptime check
-- `POST /run-agent` — entry point for the full pipeline
+### JD Parser (`app/jd_parser.py`)
 
-Also contains `_extract_text_from_upload()` which handles PDF, DOCX, and TXT JD file uploads server-side using PyMuPDF and python-docx.
+Sends the full JD text to Gemini with a strict prompt instructing it to return bare skill names — not qualified phrases:
 
-### `app/agent.py`
-The **orchestration layer**. Runs in 9 clearly commented steps:
-1. Parse JD
-2. Load + parse resumes (with cache)
-3. Embed the JD
-4. Pinecone RAG upsert + query
-5. Score all candidates
-6. Rank by match_score
-7. Interest simulation (Top 5 only)
-8. Compute final_score + decision label
-9. Clean internal fields and return API response dict
+```
+WRONG: "Generative AI Development", "AI Model Optimization"
+RIGHT: "Generative AI", "Model Optimization"
+```
 
-Also owns the embedding singleton (`all-MiniLM-L6-v2`), the LLM client shim, and the interest simulation logic including the heuristic sentiment scoring.
+The response is cleaned before `json.loads()`:
+- Strips markdown fences (` ```json `)
+- Removes JS-style `//` and `/* */` comments (common LLM mistakes)
+- Removes trailing commas before `}` or `]`
 
-### `app/scorer.py`
-**Hybrid Scoring Engine v4.** Contains:
-- `_skill_matches()` — 4-level matching (exact → substring → token overlap → embedding cosine)
-- `skill_score()` — semantic skill scoring with required/optional split
-- `experience_score()` — rule-based experience scoring with asymmetric penalties
-- `compute_match_score()` — master function combining all components + tiebreakers + human-readable explanation
-- `decide()` — maps score to decision label
+If JSON parsing still fails → regex fallback scans for 30+ known technology keywords.
 
-In-memory caches for embeddings (`_embed_cache`) and match results (`_match_cache`) prevent redundant computation within a single run.
+### Resume Parser (`app/resume_parser.py`)
 
-### `app/jd_parser.py`
-Parses a freeform job description into a structured dict. Uses Gemini with a strict JSON-only prompt, then applies a robust cleaning pipeline (`_clean_json_string`) before `json.loads()`. Falls back to `_fallback_extract()` (regex-based) on any failure. Skill names are preserved as-is (no `.title()` to avoid mangling `MLOps → Mlops`, `GCP → Gcp`).
+Key rules injected into the prompt:
 
-### `app/resume_parser.py`
-Parses individual resume files (PDF via PyMuPDF, DOCX via python-docx, TXT natively). The `parse_resumes()` function implements:
-- **Cache-first loading** — skips LLM for already-parsed files
-- **Retry loop** — up to 3 LLM attempts per resume with exponential delay
-- **Quarantine** — failed files moved to `resumes_failed/` and re-attempted at end of run
-- **Fallback parser** — regex-based extraction as last resort
-
-The LLM prompt explicitly instructs the model to: count only paid work experience (not education years), extract skills from every section including project descriptions and interests, and include both full names and abbreviations.
-
-### `app/vector_store.py`
-Wraps Pinecone for semantic candidate search. Implements a `VectorStore` class with:
-- `upsert_candidates()` — embeds all candidates and upserts to the `talent-agent` index, keyed by MD5 of source filename
-- `query_similar()` — retrieves top-K candidates semantically similar to the JD
-- `clear_namespace()` — clean-slate per job run
-- Graceful degradation if `pinecone` is not installed or `PINECONE_API_KEY` is absent
-
-The index auto-creates on first run (serverless, AWS us-east-1, cosine metric, 384 dimensions).
-
-### `app/simulator.py`
-Legacy v1 standalone interest simulator. Uses the old `google.generativeai` SDK directly and returns a JSON dict with `response`, `interest_score`, and `reason`. **Not used by the current pipeline** — interest simulation is now handled inside `agent.py` using the new `google-genai` SDK.
-
-### `app/utils.py`
-Legacy v1 utility module with PDF/DOCX text extraction (using `PyPDF2`) and cache load/save helpers. **Not used by the current pipeline** — `resume_parser.py` uses PyMuPDF directly, and cache management is in `agent.py`.
-
-### `UI.py`
-Streamlit dashboard (599 lines, v2). Key features:
-- **Dark theme** with custom CSS — JetBrains Mono + Space Grotesk fonts, CSS variable palette
-- **Left sidebar**: backend status dot, Top-K selector, JD input mode toggle, live pipeline log panel, reset button
-- **Main area**: JD input (text or file upload), Run button, last-run stats panel
-- **Candidate cards**: colored left border by decision, rank badge, name/email/experience, skill chips (matched vs other), 4-column score display, progress bar, expandable detail tabs (Score Breakdown + Candidate Response)
-- **RAG badge** (`RAG ↑`) shown on cards where Pinecone boosted the score
-- Progress bar with 7 pipeline step messages during the API call
-- 300s request timeout
+- **Experience years:** Only count paid work (jobs/internships). Explicitly instructed to ignore graduation years and education dates. `CGPA: 9.04 | 2022` does not mean 2 years experience.
+- **Skills extraction:** Extract from ALL sections including "Bonus", "Learning", "Interests", and project descriptions. If a project says "built with Gemini" → add "Gemini" to skills.
+- **Retry logic:** 3 attempts with 1.5s delay between each.
+- **Quarantine:** Failed resumes are copied to `resumes_failed/` and re-attempted after all other resumes are processed.
 
 ---
 
-## Future Improvements
+## Pinecone RAG — What It Does & Why
 
-- 🗃️ **Multi-JD support** — run agent against multiple roles simultaneously
-- 📊 **Batch export** — download results as CSV / PDF report
-- 🧠 **Fine-tuned embeddings** — domain-specific model for tech skill matching
-- 🔄 **Feedback loop** — recruiter accept/reject signals to improve scoring weights
-- ☁️ **Cloud resume storage** — S3/GCS instead of local `resumes/` folder
-- 🔍 **Explainability UI** — highlight which resume text triggered each matched skill
+### What it does right now
+
+On each run, every candidate's profile (name + summary + skills + projects) is embedded and upserted to a Pinecone serverless index, namespaced by a hash of the JD text. The JD is also embedded and queried against the index. The returned cosine scores are applied as small tiebreaker boosts (max +3%) to candidates who are semantically closest to the JD.
+
+Each candidate is identified by their **source filename** (not name + email), so two resumes from the same person with different filenames correctly produce two distinct Pinecone entries.
+
+### Why it matters at scale
+
+With 8 resumes the RAG step adds minimal value — the tiebreaker barely changes rankings. Its real purpose becomes clear at 500+ resumes:
+
+| Scale | Without Pinecone | With Pinecone |
+|---|---|---|
+| 8 resumes | Score all 8 directly | Score all 8 directly (same) |
+| 500 resumes | 500 × 25 skills × 2 embeds per match = ~25,000 embed calls | Retrieve top 50 via Pinecone → score only 50 → ~2,500 embed calls |
+| 5,000 resumes | ~250,000 embed calls, minutes of compute | Top 50 from Pinecone → ~2,500 calls, seconds |
+
+The index persists between runs. Resumes already upserted in previous runs are reused without re-embedding (Pinecone upsert is idempotent — same vector ID = no-op if unchanged).
 
 ---
 
+## Failure Handling
+
+| Failure | Behaviour |
+|---|---|
+| JD JSON parse error | Clean + retry parse; regex fallback if all fail |
+| Resume LLM error | Retry 3× with 1.5s delay |
+| All retries failed | Quarantine to `resumes_failed/`; regex fallback used for this run |
+| Post-quarantine re-attempt | After primary pass, all quarantined files get one more LLM attempt |
+| Pinecone not configured | App works normally; RAG tiebreaker = 0 |
+| Pinecone auth error | Logged as warning; scoring continues without RAG |
+| CUDA not available | Normal — embeddings run on CPU, warning is safe to ignore |
+
+---
+
+## UI Overview
+
+The Streamlit dashboard is fully custom-styled with a dark theme:
+
+- **Left sidebar** — Configuration (top-K, JD input mode), live pipeline log panel with timestamped entries and colour-coded levels (✓ ok, ⚠ warn, ✕ error, › info), backend status indicator, reset button
+- **Main area** — JD input (text or file upload), run button, last-run summary
+- **Candidate cards** — Ranked with colour-coded border (green → Strong Shortlist, yellow → Shortlist, orange → Consider, red → Reject), skill chips (matched vs unmatched), score metrics, progress bar, RAG boost badge
+- **Expandable detail** — Full score breakdown with formula, matched/missing skills, simulated candidate response
+
+---
+
+## Known Limitations & Roadmap
+
+### Current limitations
+
+- Embedding model (`all-MiniLM-L6-v2`) runs on CPU — slow on first load, faster once cached
+- Skill matching threshold (0.60) is fixed; some niche technologies may over- or under-match
+- Interest simulation is LLM-generated and always sounds positive — treat as illustrative only
+- Resume cache (`resumes_cache.json`) must be manually deleted when prompts are updated
+
+### Planned improvements
+
+- [ ] Multi-JD support — score one resume pool against multiple JDs simultaneously
+- [ ] Recruiter feedback loop — thumbs up/down on decisions to calibrate thresholds
+- [ ] Bulk resume upload via UI (currently requires dropping files in `resumes/` folder)
+- [ ] Export shortlist to CSV / PDF report
+- [ ] Async scoring — parallel candidate processing for large resume pools
+- [ ] GPU embedding support for faster throughput
+- [ ] Resume deduplication — detect same person across multiple resume versions
+
+---
+
+## Contributing
+
+Pull requests welcome. For major changes, open an issue first to discuss the approach.
+
+```bash
+# Run the backend in dev mode
+uvicorn app.main:app --reload --log-level debug
+
+# The UI hot-reloads automatically when you save UI.py
+streamlit run UI.py
+```
+
+---
+
+
+<div align="center">
 ## 👨‍💻 Author
 
 **Piyush Jha** — ML Engineer  
@@ -440,3 +520,5 @@ Streamlit dashboard (599 lines, v2). Key features:
 ---
 
 *Found this useful? Consider leaving a ⭐ — it helps others discover the work!*
+
+</div>
