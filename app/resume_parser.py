@@ -1,206 +1,281 @@
-import google.generativeai as genai
+"""
+resume_parser.py — Robust resume parser.
+
+Features:
+  - Retry up to 3 times on parse failure (LLM or JSON)
+  - Quarantines failed resumes to <resume_dir>/../resumes_failed/
+  - After primary pass, re-attempts quarantined files once more
+  - Normalises output regardless of LLM response format
+"""
+
 import os
-import json
 import re
-from dotenv import load_dotenv
+import json
+import shutil
+import logging
+import time
+from pathlib import Path
+from typing import Optional
 
-load_dotenv()
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+import fitz          # PyMuPDF
+import docx
 
-# ---------- NORMALIZATION ----------
-def normalize_skill(skill):
-    return skill.strip().title()
+logger = logging.getLogger(__name__)
 
+MAX_RETRIES = 3
+RETRY_DELAY = 1.5   # seconds between retries
 
-# ---------- EMAIL ----------
-def extract_email(text):
-    match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
-    return match.group() if match else "Not Provided"
+# ── Text extraction ──────────────────────────────────────────────────────────
 
-
-# ---------- NAME ----------
-def extract_name(text):
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-
-    for line in lines[:5]:
-        if any(k in line.lower() for k in ["email", "phone", "@", "contact"]):
-            continue
-
-        words = line.split()
-        if 2 <= len(words) <= 4 and all(w.isalpha() for w in words):
-            return line
-
-    return "Unknown Candidate"
-
-
-# ---------- SAFE JSON ----------
-def safe_parse_json(content):
-    content = content.replace("```json", "").replace("```", "")
-
-    match = re.search(r"\{.*\}", content, re.DOTALL)
-    if not match:
-        return None
-
+def extract_text_from_pdf(path: str) -> str:
     try:
-        return json.loads(match.group())
-    except:
+        doc = fitz.open(path)
+        return "\n".join(page.get_text() for page in doc).strip()
+    except Exception as e:
+        logger.error("PDF extraction failed for %s: %s", path, e)
+        return ""
+
+
+def extract_text_from_docx(path: str) -> str:
+    try:
+        doc = docx.Document(path)
+        return "\n".join(p.text for p in doc.paragraphs).strip()
+    except Exception as e:
+        logger.error("DOCX extraction failed for %s: %s", path, e)
+        return ""
+
+
+def extract_text(path: str) -> str:
+    ext = Path(path).suffix.lower()
+    if ext == ".pdf":
+        return extract_text_from_pdf(path)
+    elif ext == ".docx":
+        return extract_text_from_docx(path)
+    elif ext == ".txt":
+        return Path(path).read_text(encoding="utf-8", errors="replace").strip()
+    else:
+        logger.warning("Unsupported file type: %s", ext)
+        return ""
+
+# ── Prompt ───────────────────────────────────────────────────────────────────
+
+RESUME_PROMPT = """You are a precise JSON extractor for resumes/CVs.
+
+Extract the following fields from the resume text below.
+Return ONLY valid JSON — no markdown, no backticks, no comments, no trailing commas.
+
+Schema:
+{{
+  "name": "Full Name",
+  "email": "email or null",
+  "phone": "phone or null",
+  "experience_years": <number or null>,
+  "skills": ["exhaustive list of ALL technical skills mentioned anywhere in the resume"],
+  "projects": ["short description of each project"],
+  "education": "highest degree and institution",
+  "summary": "2-3 sentence professional summary"
+}}
+
+Rules:
+- experience_years: ONLY count actual paid work experience (internships, jobs, freelance).
+  DO NOT count education years, graduation years, or project duration.
+  If the resume has no work experience section, return null.
+  If there are internships with clear durations, sum those months and convert to years.
+- skills: Extract ALL skills from EVERY section — including skills listed under "Bonus",
+  "Learning", "Interests", or embedded in project descriptions.
+  Examples: if projects mention "built with Gemini LLM" → add "Gemini".
+  If interests mention "Generative AI" → add "Generative AI".
+  If a section says "AI/LLM: Prompt Engineering, LangChain, RAG" → add all of them.
+  Include both the full name AND common abbreviations when both appear
+  (e.g. add both "Retrieval-Augmented Generation" and "RAG").
+- projects: one string per project (title + one-line description)
+- Return ONLY the JSON object, nothing else
+
+Resume:
+{resume_text}
+"""
+
+# ── JSON cleaning (same as jd_parser) ────────────────────────────────────────
+
+def _clean_json(raw: str) -> str:
+    raw = re.sub(r"```(?:json)?\s*", "", raw).strip().strip("`").strip()
+    raw = re.sub(r"//[^\n]*", "", raw)
+    raw = re.sub(r"/\*.*?\*/", "", raw, flags=re.DOTALL)
+    raw = re.sub(r",\s*([\}\]])", r"\1", raw)
+    return raw.strip()
+
+
+def _normalize_list(lst) -> list:
+    if not isinstance(lst, list):
+        return []
+    return [str(i).strip() for i in lst if str(i).strip()]
+
+
+def _safe_float(val) -> Optional[float]:
+    try:
+        return float(val)
+    except (TypeError, ValueError):
         return None
 
+# ── Regex fallback ───────────────────────────────────────────────────────────
 
-# ---------- FALLBACK ----------
-def fallback_parser(text):
-    text_lower = text.lower()
+_SKILL_RE = re.compile(
+    r"\b(Python|Java(?:Script|Script)?|TypeScript|C\+\+|C#|Go|Rust|SQL|NoSQL|"
+    r"MongoDB|PostgreSQL|MySQL|Redis|AWS|Azure|GCP|Docker|Kubernetes|"
+    r"FastAPI|Flask|Django|React|Angular|Vue|Machine Learning|Deep Learning|"
+    r"NLP|Computer Vision|TensorFlow|PyTorch|Scikit-?learn|Keras|Pandas|NumPy|"
+    r"Spark|Kafka|Airflow|Generative AI|LLM|MLOps|OpenAI|Gemini|LangChain|"
+    r"RAG|Pinecone|Git|Linux|Bash|Tableau|Power BI|Excel|Communication|Agile)\b",
+    re.IGNORECASE,
+)
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
+_NAME_RE  = re.compile(r"^([A-Z][a-z]+(?: [A-Z][a-z]+)+)", re.MULTILINE)
+_EXP_RE   = re.compile(r"(\d+(?:\.\d+)?)\+?\s*(?:years?|yrs?)\s*(?:of\s*)?(?:experience)?", re.IGNORECASE)
 
-    name = extract_name(text)
-    email = extract_email(text)
 
-    skill_keywords = [
-        "python", "java", "sql", "aws", "docker", "react", "node",
-        "machine learning", "deep learning", "fastapi",
-        "accounting", "tally", "gst", "taxation", "audit",
-        "financial analysis", "bookkeeping",
-        "recruitment", "talent acquisition", "payroll",
-        "performance management", "training",
-        "excel", "power bi", "communication", "leadership"
-    ]
+def _fallback_parse(text: str, filename: str) -> dict:
+    name_m  = _NAME_RE.search(text)
+    email_m = _EMAIL_RE.search(text)
+    exp_m   = _EXP_RE.search(text)
+    skills  = list(dict.fromkeys(m.group(0).title() for m in _SKILL_RE.finditer(text)))
 
-    skills = []
-    for skill in skill_keywords:
-        if skill in text_lower:
-            skills.append(normalize_skill(skill))
-
-    exp_match = re.search(r"(\d+)\s*\+?\s*(years|yrs)", text_lower)
-    experience = int(exp_match.group(1)) if exp_match else 0
-
-    projects = []
-    for line in text.split("\n"):
-        if "project" in line.lower() and len(line.strip()) > 5:
-            projects.append({
-                "title": line.strip(),
-                "description": ""
-            })
-
-    if not projects:
-        projects = [{
-            "title": "General Experience",
-            "description": text[:200]
-        }]
+    # Estimate name from filename if not found
+    name = name_m.group(1) if name_m else Path(filename).stem.replace("_", " ").title()
 
     return {
         "name": name,
-        "email": email,
-        "skills": list(set(skills)),
-        "experience": experience,
-        "projects": projects,
-        "bio": text[:300]
+        "email": email_m.group(0) if email_m else None,
+        "phone": None,
+        "experience_years": _safe_float(exp_m.group(1)) if exp_m else None,
+        "skills": skills,
+        "projects": [],
+        "education": "",
+        "summary": f"Resume parsed via fallback extractor from {filename}.",
+        "_source_file": filename,
     }
 
+# ── Single-file LLM parse (with retries) ─────────────────────────────────────
 
-# ---------- MAIN ----------
-def parse_resume(text):
+def _llm_parse_with_retry(text: str, filename: str, model) -> Optional[dict]:
+    """Attempt LLM parse up to MAX_RETRIES times. Returns dict or None."""
+    prompt = RESUME_PROMPT.format(resume_text=text[:6000])  # truncate for token safety
 
-    prompt = f"""
-    You are an expert resume parser.
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = model.generate_content(prompt)
+            raw = response.text.strip()
+            cleaned = _clean_json(raw)
+            parsed = json.loads(cleaned)
 
-    Extract structured candidate information from the resume.
+            return {
+                "name": str(parsed.get("name") or Path(filename).stem).strip(),
+                "email": parsed.get("email"),
+                "phone": parsed.get("phone"),
+                "experience_years": _safe_float(parsed.get("experience_years")),
+                "skills": _normalize_list(parsed.get("skills", [])),
+                "projects": _normalize_list(parsed.get("projects", [])),
+                "education": str(parsed.get("education") or ""),
+                "summary": str(parsed.get("summary") or ""),
+                "raw_text": text,
+                "_source_file": filename,
+                "_parse_method": "llm",
+            }
 
-    STRICT RULES:
-    - Return ONLY valid JSON (no markdown, no ```json, no explanation)
-    - Do NOT add extra text before or after JSON
-    - Do NOT hallucinate missing data
-    - If a field is not found, return empty string or empty list
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "⚠️  [%s] Attempt %d/%d — JSON parse failed: %s",
+                filename, attempt, MAX_RETRIES, e,
+            )
+        except Exception as e:
+            logger.warning(
+                "⚠️  [%s] Attempt %d/%d — LLM error: %s",
+                filename, attempt, MAX_RETRIES, e,
+            )
 
-    EXTRACTION RULES:
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_DELAY)
 
-    1. NAME
-    - Extract full candidate name (usually at top)
-    - Avoid picking email, phone, or headings
+    return None  # all retries exhausted
 
-    2. EMAIL
-    - Extract email address exactly
+# ── Quarantine helpers ────────────────────────────────────────────────────────
 
-    3. SKILLS
-    - Extract ALL relevant skills
-    - Include technical, professional, and domain-specific skills
-    - Examples:
-      - Tech: Python, Docker, SQL
-      - Finance: Accounting, GST, Audit
-      - HR: Recruitment, Payroll
-    - Normalize skill names (e.g., "ml" → "Machine Learning")
+def _quarantine(filepath: str, failed_dir: str) -> str:
+    os.makedirs(failed_dir, exist_ok=True)
+    dest = os.path.join(failed_dir, os.path.basename(filepath))
+    shutil.copy2(filepath, dest)
+    logger.warning("📦  Quarantined: %s  →  %s", filepath, dest)
+    return dest
 
-    4. EXPERIENCE
-    - Extract TOTAL years of experience as integer
-    - If unclear, estimate conservatively
+# ── Public API ────────────────────────────────────────────────────────────────
 
-    5. PROJECTS
-    - Extract 1–5 most important projects
-    - Each project must include:
-      - title (short)
-      - description (1 line)
-
-    6. BIO
-    - Short 2–3 line professional summary
-
-    OUTPUT FORMAT:
-
-    {{
-      "name": "",
-      "email": "",
-      "skills": [],
-      "experience": 0,
-      "projects": [
-        {{
-          "title": "",
-          "description": ""
-        }}
-      ],
-      "bio": ""
-    }}
-
-    Resume:
-    {text[:4000]}
+def parse_resumes(resume_dir: str, model, cache: dict) -> list:
     """
+    Parse all resumes in resume_dir.
+    On failure after MAX_RETRIES, quarantine to resumes_failed/ and
+    re-attempt quarantined files at the end.
 
-    try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(prompt)
+    Returns list of parsed candidate dicts.
+    """
+    resume_dir = os.path.abspath(resume_dir)
+    failed_dir = os.path.join(os.path.dirname(resume_dir), "resumes_failed")
+    supported   = {".pdf", ".docx", ".txt"}
 
-        parsed = safe_parse_json(response.text)
+    files = [
+        os.path.join(resume_dir, f)
+        for f in os.listdir(resume_dir)
+        if Path(f).suffix.lower() in supported
+    ]
 
-        if not parsed:
-            print("⚠️ LLM failed → fallback parser")
-            return fallback_parser(text)
+    results = []
+    quarantined_paths = []
 
-        parsed["name"] = parsed.get("name") or extract_name(text)
-        parsed["email"] = parsed.get("email") or extract_email(text)
-        parsed["skills"] = [normalize_skill(s) for s in parsed.get("skills", [])]
-        parsed["experience"] = parsed.get("experience", 0)
-        parsed["projects"] = parsed.get("projects", [])
-        parsed["bio"] = parsed.get("bio") or text[:300]
+    # ── Primary pass ─────────────────────────────────────────────────────────
+    for filepath in files:
+        filename = os.path.basename(filepath)
 
-        cleaned_projects = []
-        for proj in parsed["projects"]:
-            if isinstance(proj, dict):
-                cleaned_projects.append({
-                    "title": proj.get("title", "Project"),
-                    "description": proj.get("description", "")
-                })
-            else:
-                cleaned_projects.append({
-                    "title": "Project",
-                    "description": str(proj)
-                })
+        # Cache hit
+        if filename in cache:
+            logger.info("✅  Cache hit: %s", filename)
+            results.append(cache[filename])
+            continue
 
-        if not cleaned_projects:
-            cleaned_projects = [{
-                "title": "General Experience",
-                "description": text[:200]
-            }]
+        logger.info("🔄  Parsing: %s", filename)
+        text = extract_text(filepath)
 
-        parsed["projects"] = cleaned_projects
+        if not text.strip():
+            logger.warning("⚠️  Empty text for %s — quarantining", filename)
+            quarantined_paths.append(_quarantine(filepath, failed_dir))
+            continue
 
-        return parsed
+        parsed = _llm_parse_with_retry(text, filename, model)
 
-    except Exception as e:
-        print("LLM Error → fallback:", e)
-        return fallback_parser(text)
+        if parsed is None:
+            logger.warning("❌  All retries failed for %s — using fallback + quarantine", filename)
+            parsed = _fallback_parse(text, filename)
+            parsed["_parse_method"] = "fallback_quarantined"
+            quarantined_paths.append(_quarantine(filepath, failed_dir))
+
+        cache[filename] = parsed
+        results.append(parsed)
+
+    # ── Quarantine re-attempt pass ────────────────────────────────────────────
+    if quarantined_paths:
+        logger.info("🔁  Re-attempting %d quarantined resume(s)...", len(quarantined_paths))
+        for filepath in quarantined_paths:
+            filename = os.path.basename(filepath)
+            text = extract_text(filepath)
+            if not text.strip():
+                continue
+
+            parsed = _llm_parse_with_retry(text, filename, model)
+            if parsed:
+                logger.info("✅  Quarantine recovery succeeded: %s", filename)
+                parsed["_parse_method"] = "llm_recovered"
+                # Update the result already added (it may have been added as fallback)
+                for i, r in enumerate(results):
+                    if r.get("_source_file") == filename or r.get("name", "").lower() in filename.lower():
+                        results[i] = parsed
+                        break
+                cache[filename] = parsed
+
+    return results

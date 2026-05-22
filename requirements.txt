@@ -1,7 +1,25 @@
+# Core backend
 fastapi
-uvicorn
+uvicorn[standard]
+python-multipart
 python-dotenv
+
+# LLM — new Google GenAI SDK (replaces deprecated google-generativeai)
+google-genai
+
+# Embeddings
 sentence-transformers
-google-generativeai
+torch
+
+# Resume parsing
 pymupdf
 python-docx
+
+# Vector DB — RAG
+pinecone
+
+# Frontend
+streamlit
+
+# Utilities
+requests
